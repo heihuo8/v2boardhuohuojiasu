@@ -16,6 +16,9 @@ use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Carbon\Carbon;
+
 
 class OrderController extends Controller
 {
@@ -75,11 +78,36 @@ class OrderController extends Controller
 
     public function save(OrderSave $request)
     {
+        $userId = $request->user['id'];
         $userService = new UserService();
+
+		// 检查当前用户在过去十分钟内创建的订单数量
+        $recentOrdersCount = Order::where('user_id', $userId) // 确保只查询当前用户的订单
+            ->where('created_at', '>=', Carbon::now()->subMinutes(10)->timestamp) // 使用时间戳
+            ->count();
+
+        if ($recentOrdersCount >= 5) { // 限制10分钟内最多创建5个订单
+            abort(429, __('请勿频繁创建并取消订单'));
+        }
+
+
+        // 检查是否存在未支付的订单
+        $existingOrder = Order::where('user_id', $userId)
+            ->where('status', 0) // 0 表示未支付
+            ->first();
+
+        if ($existingOrder) {
+            // 取消未支付的订单
+            $orderService = new OrderService($existingOrder);
+            if (!$orderService->cancel()) {
+                abort(500, __('Cancel failed for existing unpaid order'));
+            }
+        }
         if ($userService->isNotCompleteOrderByUserId($request->user['id'])) {
             abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
         }
         if ($request->input('plan_id') == 0) {
+            // 原版的充值金额验证
             $amount = $request->input('deposit_amount');
             if ($amount <= 0) {
                 abort(500, __('Failed to create order, deposit amount must be greater than 0'));
@@ -87,6 +115,7 @@ class OrderController extends Controller
             if ($amount >= 9999999 ) {
                 abort(500, __('Deposit amount too large, please contact the administrator'));
             }
+
             $user = User::find($request->user['id']);
             DB::beginTransaction();
             $order = new Order();
@@ -96,7 +125,7 @@ class OrderController extends Controller
             $order->period = 'deposit';
             $order->trade_no = Helper::generateOrderNo();
             $order->total_amount = $amount;
-            
+
             $orderService->setOrderType($user);
             $orderService->setInvite($user);
 
@@ -104,9 +133,9 @@ class OrderController extends Controller
                 DB::rollback();
                 abort(500, __('Failed to create order'));
             }
-    
+
             DB::commit();
-    
+
             return response([
                 'data' => $order->trade_no
             ]);
@@ -232,13 +261,41 @@ class OrderController extends Controller
             $order->handling_amount = round(($order->total_amount * ($payment->handling_fee_percent / 100)) + $payment->handling_fee_fixed);
         }
         $order->payment_id = $method;
+
+		// 获取 Referer 请求头
+        $referer = $request->header('referer');
+        $refererDomain = null;
+
+        // 检查 Referer 是否存在
+        if ($referer) {
+            // 解析 Referer URL 并重建只包含协议和主机名的 URL
+            $parsedUrl = parse_url($referer);
+            $refererDomain = isset($parsedUrl['scheme']) && isset($parsedUrl['host'])
+                ? $parsedUrl['scheme'] . '://' . $parsedUrl['host']
+                : null;
+
+            // 使用缓存存储 referer 信息，仅存储域名部分
+            $domainOnly = isset($parsedUrl['host']) ? $parsedUrl['host'] : null;
+            if ($domainOnly) {
+                Cache::put('order_referer_' . $tradeNo, $domainOnly, now()->addMinutes(120));
+            }
+        }
+
         if (!$order->save()) abort(500, __('Request failed, please try again later'));
-        $result = $paymentService->pay([
-            'trade_no' => $tradeNo,
-            'total_amount' => isset($order->handling_amount) ? ($order->total_amount + $order->handling_amount) : $order->total_amount,
-            'user_id' => $order->user_id,
-            'stripe_token' => $request->input('token')
-        ]);
+        // 构建支付请求参数
+		$payParams = [
+			'trade_no' => $tradeNo,
+			'total_amount' => isset($order->handling_amount) ? ($order->total_amount + $order->handling_amount) : $order->total_amount,
+			'user_id' => $order->user_id,
+			'stripe_token' => $request->input('token')
+		];
+
+		// 如果 $refererDomain 存在，添加 refer 参数
+		if ($refererDomain) {
+			$payParams['refer'] = $refererDomain;
+		}
+
+		$result = $paymentService->pay($payParams);
         return response([
             'type' => $result['type'],
             'data' => $result['data']
