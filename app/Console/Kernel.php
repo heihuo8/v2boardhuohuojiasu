@@ -43,6 +43,12 @@ class Kernel extends ConsoleKernel
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
+
+        // 二开功能：邮件增强
+        if(config('gunzi.mail_up')===true){
+            $schedule->command('gunzi:util_minute')->everyMinute();
+            $schedule->command('gunzi:util_day')->daily();
+        }
     }
 
     /**
