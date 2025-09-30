@@ -51,10 +51,7 @@ class PaymentController extends Controller
         // 获取套餐信息
         $planName = $order->plan_id ? Plan::find($order->plan_id)->name : '未知套餐';
         $planPeriod = $this->getPeriodText($order->period);
-        
-        // 获取优惠券信息
-        $couponCode = Cache::get('order_coupon_' . $order->trade_no, '无'); // 从缓存中获取
-        
+
         // 从缓存中获取 referer 信息
         $refererDomain = Cache::get('order_referer_' . $order->trade_no, '客户端');
         
@@ -74,14 +71,13 @@ class PaymentController extends Controller
         
         $telegramService = new TelegramService();
         $message = sprintf(
-            "💰 成功收款%s元\n———————————————\n🌐 支付接口：%s\n🏦 支付渠道：%s\n📧 用户邮箱：`%s`\n📦 购买套餐：%s\n📅 套餐周期：%s\n🎫 优  惠  券：`%s`\n👥 邀  请  人：`%s`\n🆔 订  单  号：`%s`\n🌐 来源网址：`%s`\n———————————————\n💵 今日总收入：%s元",
+            "💰 成功收款%s元\n———————————————\n🌐 支付接口：%s\n🏦 支付渠道：%s\n📧 用户邮箱：`%s`\n📦 购买套餐：%s\n📅 套餐周期：%s\n👥 邀  请  人：`%s`\n🆔 订  单  号：`%s`\n🌐 来源网址：`%s`\n———————————————\n💵 今日总收入：%s元",
             $order->total_amount / 100,
             $payment->payment,
             $payment->name,
             $userEmail,
             $planName,
             $planPeriod,
-            $couponCode, // 在消息中包含优惠券信息
             $inviteUserEmail,
             $order->trade_no,
             $refererDomain,
