@@ -268,10 +268,11 @@ class OrderController extends Controller
 
         // 检查 Referer 是否存在
         if ($referer) {
-            // 解析 Referer URL 并重建只包含协议和主机名的 URL
+            // 解析 Referer URL 并重建包含协议、主机名和端口的完整 URL
             $parsedUrl = parse_url($referer);
             $refererDomain = isset($parsedUrl['scheme']) && isset($parsedUrl['host'])
                 ? $parsedUrl['scheme'] . '://' . $parsedUrl['host']
+                  . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '')
                 : null;
 
             // 使用缓存存储 referer 信息，仅存储域名部分
